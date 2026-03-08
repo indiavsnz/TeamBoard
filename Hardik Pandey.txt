@@ -1,3 +1,50 @@
+Hardik Pandya is an Indian international cricketer known as one of the best all-rounders in modern cricket. He contributes with powerful batting, fast bowling, and fielding.
+
+Basic Information
+
+Full Name: Hardik Himanshu Pandya
+
+Date of Birth: 11 October 1993
+
+Birthplace: Surat, Gujarat, India
+
+Role: All-rounder
+
+Batting Style: Right-handed
+
+Bowling Style: Right-arm fast-medium
+
+
+IPL Career
+
+Plays in the Indian Premier League.
+
+Became famous while playing for Mumbai Indians.
+
+Later captained Gujarat Titans and won the IPL 2022 title in their first season.
+
+Known for finishing matches with big sixes.
+
+
+International Career
+
+Plays for the India national cricket team in ODI, T20I, and Test cricket (mainly limited-overs now).
+
+Made his international debut in 2016.
+
+Often plays the role of a finisher and fast-bowling all-rounder.
+
+
+Achievements
+
+Helped India win many important matches with quick finishing innings.
+
+Captained Gujarat Titans to IPL championship in 2022.
+
+One of the most impactful all-rounders in white-ball cricket.
+Interesting Facts
+
+
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
@@ -412,3 +459,17 @@ dq_report = spark.createDataFrame([
 display(dq_report)
 
 
+His brother Krunal Pandya is also a professional cricketer.
+
+Known for his aggressive batting and confidence on the field.
+
+Famous for hitting long sixes in pressure situations.
+
+
+If you want, I can also show:
+
+Top 5 best innings of Hardik Pandya
+
+Hardik Pandya vs Ben Stokes comparison
+
+His IPL and international statistics. 🏏
