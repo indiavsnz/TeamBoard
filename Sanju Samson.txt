@@ -192,8 +192,8 @@ Audit
 %run ./audit_logger
 
 
-bronze_customer = spark.table("exam.bronze.hrm5896_customer")
-bronze_account  = spark.table("exam.bronze.hrm5896_account")
+bronze_customer = spark.table("exam.bronze.hrm1111_customer")
+bronze_account  = spark.table("exam.bronze.hrm1111_account")
 
 bronze_batches = bronze_customer.select("batchid").distinct()
 
