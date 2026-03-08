@@ -1,0 +1,217 @@
+
+from pyspark.sql.functions import *
+from pyspark.sql.types import *
+
+catalog = "exam"
+bronze_schema = "bronze"
+hrmid = "hrm1111"
+
+spark.sql(f"USE CATALOG {catalog}")
+
+dbutils.widgets.text("batch_id", "1")
+batch_id = int(dbutils.widgets.get("batch_id"))
+
+base_path = f"/Volumes/exam/source/data/Batch{batch_id}/"
+
+customer_path = f"{base_path}Customer.txt"
+account_path = f"{base_path}Account.txt"
+
+
+--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X
+Historical Data
+-----------------
+
+
+from pyspark.sql.types import *
+
+customer_schema = StructType([
+    StructField("CDC_FLAG", StringType(), True),
+    StructField("C_ID", LongType(), True),
+    StructField("C_TIER", IntegerType(), True),
+    StructField("C_DOB", DateType(), True),
+    StructField("C_NAT_TX_ID", StringType(), True)
+])
+
+customer_df = (spark.read
+    .option("delimiter","|")
+    .option("inferSchema","true")
+    .schema(customer_schema)
+    .option("header","false")
+    .csv(customer_path)
+)
+
+customer_df = (customer_df
+    .withColumn("batchid", lit(batch_id))
+    .withColumn("ingestion_timestamp", current_timestamp())
+)
+
+
+display(customer_df)
+
+
+(customer_df.write
+ .format("delta")
+ .mode("append")
+ .option("mergeSchema","true")
+ .saveAsTable(f"{catalog}.{bronze_schema}.{hrmid}_customer"))
+
+
+--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X
+Autoloader
+-------------
+
+from pyspark.sql.functions import *
+from pyspark.sql.types import *
+
+# checkpoint location
+checkpoint_customers = "/Volumes/a1/source/raw/_checkpoints/customers"
+
+# ----------------------------
+# Schema
+# ----------------------------
+customers_schema = StructType([
+    StructField("CDC_FLAG", StringType(), True),
+    StructField("C_NAT_TX_ID", StringType(), True)
+])
+
+# ----------------------------
+# Read data with Autoloader
+# ----------------------------
+customer_df = (
+    spark.readStream
+    .format("cloudFiles")
+    .option("cloudFiles.format","csv")
+    .option("delimiter","|")
+    .option("header","false")
+    .option("cloudFiles.schemaLocation", f"{checkpoint_customers}/schema")
+    .schema(customers_schema)
+    .load("/Volumes/a1/source/raw/*/Customer.txt")
+    .withColumn("_ingest_time", current_timestamp())
+    .withColumn("_source_file", col("_metadata.file_path"))
+)
+
+# ----------------------------
+# Function for Bronze + Audit
+# ----------------------------
+def write_bronze_and_audit(batch_df, batch_id):
+
+    batch_df.write.format("delta").mode("append").saveAsTable("a1.bronze.raw_customers")
+
+    file_counts = batch_df.groupBy("_source_file").count().collect()
+
+    import re
+
+    for row in file_counts:
+
+        file_path = row["_source_file"]
+        record_count = row["count"]
+
+        # extract batch number
+        match = re.search(r'Batch(?:%20|\s)?(\d+)', file_path)
+        batch_folder = int(match.group(1)) if match else 0
+
+        spark.sql(f"""
+        INSERT INTO a1.audit.HRM_Bronze_audit_log
+        VALUES (
+            current_timestamp(),
+            {batch_folder},
+            'Bronze Ingestion',
+            'INFO',
+            'Customer file loaded',
+            'File: {file_path}, Records: {record_count}',
+            'HRM1234'
+        )
+        """)
+
+# ----------------------------
+# Start Streaming
+# ----------------------------
+(
+    customer_df.writeStream
+    .foreachBatch(write_bronze_and_audit)
+    .option("checkpointLocation", f"{checkpoint_customers}/stream")
+    .trigger(availableNow=True)
+    .start()
+    .awaitTermination()
+)
+
+print("✓ Bronze load and audit logging completed")
+
+
+--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X
+Validation
+-----------
+
+
+df_batch1 = spark.read.text("/Volumes/a1/source/raw/Batch 1/Customer.txt").count()
+print("Count of Customers in Batch1 : " , df_batch1)
+df_batch2 = spark.read.text("/Volumes/a1/source/raw/Batch 2/Customer.txt").count()
+print("Count of Customers in Batch2 : " , df_batch2)
+
+# Verify customer table
+print("=== Bronze: raw_customers ===")
+customers_count = spark.table("a1.bronze.raw_customers").count()
+print(f"Total records: {customers_count}")
+display(spark.table("a1.bronze.raw_customers").limit(10))
+
+
+
+from pyspark.sql.functions import current_timestamp, lit
+
+raw_customer_count = spark.read \
+    .option("header", "false") \
+    .csv(customer_path) \
+    .count()
+
+bronze_customer_count = spark.table(f"{catalog}.{bronze_schema}.{hrmid}_customer").count()
+bronze_account_count  = spark.table(f"{catalog}.{bronze_schema}.{hrmid}_account").count()
+
+
+validation_data = [
+    (batch_id, "customer.txt", raw_customer_count, bronze_customer_count,
+     "PASS" if raw_customer_count == bronze_customer_count else "FAIL"),
+
+    (batch_id, "account.txt", raw_account_count, bronze_account_count,
+     "PASS" if raw_account_count == bronze_account_count else "FAIL")
+]
+
+
+validation_df = spark.createDataFrame(
+    validation_data,
+    ["batch_id", "file_name", "raw_count", "bronze_count", "status"]
+).withColumn("load_ts", current_timestamp())
+
+
+validation_df.display()
+
+
+--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X--X
+Audit
+--------
+
+%run ./audit_logger
+
+
+bronze_customer = spark.table("exam.bronze.hrm5896_customer")
+bronze_account  = spark.table("exam.bronze.hrm5896_account")
+
+bronze_batches = bronze_customer.select("batchid").distinct()
+
+for row in bronze_batches.collect():
+    batch_id = row.batchid
+
+    cust_cnt = bronze_customer.filter(f"batchid = {batch_id}").count()
+    acc_cnt  = bronze_account.filter(f"batchid = {batch_id}").count()
+
+    write_audit_log(
+        batch_id,
+        "BRONZE_LAYER",
+        "AUDIT",
+        "Bronze batch load completed",
+        message_data={
+            "bronze_customer_batch_count": cust_cnt,
+            "bronze_account_batch_count": acc_cnt
+        }
+    )
+
+
