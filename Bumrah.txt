@@ -1,3 +1,55 @@
+Jasprit Bumrah is one of the best fast bowlers in world cricket. He is famous for his unique bowling action, deadly yorkers, and accuracy.
+
+Basic Information
+
+Full Name: Jasprit Jasbirsingh Bumrah
+
+Date of Birth: 6 December 1993
+
+Birthplace: Ahmedabad, Gujarat, India
+
+Role: Fast Bowler
+
+Batting Style: Right-handed
+
+Bowling Style: Right-arm fast
+
+
+IPL Career
+
+Plays in the Indian Premier League.
+
+A key player for Mumbai Indians.
+
+Known as the main strike bowler for the team in powerplay and death overs.
+
+
+International Career
+
+Plays for the India national cricket team in Test, ODI, and T20I formats.
+
+Made his international debut in 2016.
+
+One of the most successful bowlers in modern cricket.
+
+
+Achievements
+
+Ranked among the top fast bowlers in ICC rankings.
+
+Known for delivering perfect yorkers in death overs.
+
+Has taken many five-wicket hauls in Test cricket.
+
+
+Interesting Facts
+
+His unusual bowling action makes it difficult for batsmen to read the ball.
+
+One of the best death-over bowlers in the world.
+
+
+
 create schema if not exists exam.gold
 
 
@@ -271,3 +323,14 @@ for row in recon_df.collect():
         }
     )
 
+
+Played an important role in many India and Mumbai Indians victories.
+
+
+If you want, I can also tell you:
+
+Top 5 best spells of Bumrah
+
+Why his bowling action is unique
+
+Bumrah vs Shaheen Afridi comparison. 🏏
