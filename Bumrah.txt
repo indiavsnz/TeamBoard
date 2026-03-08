@@ -1,0 +1,273 @@
+create schema if not exists exam.gold
+
+
+------------
+Dim1 (SCD2)
+------------
+
+CREATE TABLE IF NOT EXISTS exam.gold.hrm5896_dim_customer (
+  sk_customerid BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
+  customerid BIGINT NOT NULL,
+  taxid STRING NOT NULL,
+  statusid STRING,
+  lastname STRING NOT NULL,
+  firstname STRING NOT NULL,
+  middleinitial STRING,
+  gender STRING,
+  tier TINYINT,
+  dob DATE NOT NULL,
+  addressline1 STRING NOT NULL,
+  addressline2 STRING,
+  postalcode STRING NOT NULL,
+  city STRING NOT NULL,
+  stateprov STRING NOT NULL,
+  country STRING,
+  phone1 STRING,
+  phone2 STRING,
+  phone3 STRING,
+  email1 STRING, 
+  email2 STRING,
+  iscurrent BOOLEAN NOT NULL,
+  batchid INT NOT NULL,
+  effectivedate DATE NOT NULL,
+  enddate DATE NOT NULL
+)
+USING DELTA;
+
+
+-------------
+Dim2 (SCD2)
+-------------
+
+CREATE TABLE IF NOT EXISTS exam.gold.hrm5896_dim_account (
+  sk_accountid BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL,
+  accountid BIGINT NOT NULL,
+  customerid BIGINT NOT NULL,
+  sk_customerid BIGINT NOT NULL,
+  accountdesc STRING,
+  taxstatus TINYINT,
+  statusid STRING,
+  batchid INT NOT NULL,
+  updatedate DATE NOT NULL
+)
+USING DELTA;
+
+
+-------------
+Staging View
+-------------
+
+CREATE OR REPLACE TEMP VIEW stg_gold_customer AS
+SELECT
+  customerid,
+  taxid,
+  statusid,
+  lastname,
+  firstname,
+  middleinitial,
+  gender,
+  tier,
+  dob,
+  addressline1,
+  addressline2,
+  postalcode,
+  city,
+  stateprov,
+  country,
+  phone1,
+  phone2,
+  phone3,
+  email1,
+  email2,
+  batchid,
+  current_date()        AS effectivedate,
+  DATE '9999-12-31'     AS enddate,
+  true                  AS iscurrent
+FROM exam.silver.hrm5896_customer;
+
+
+--------------------------
+SCD Type 2 Update Logic
+--------------------------
+
+MERGE INTO exam.gold.hrm5896_dim_customer t
+USING stg_gold_customer s
+ON t.customerid = s.customerid
+AND t.iscurrent = true
+
+WHEN MATCHED
+AND (
+     t.taxid        <> s.taxid OR
+     t.statusid     <> s.statusid OR
+     t.lastname     <> s.lastname OR
+     t.firstname    <> s.firstname OR
+     t.tier         <> s.tier OR
+     t.addressline1 <> s.addressline1 OR
+     t.city         <> s.city OR
+     t.stateprov    <> s.stateprov
+)
+THEN UPDATE SET
+  t.iscurrent = false,
+  t.enddate   = current_date();
+
+
+
+--------------------------------
+Insert New Customer
+--------------------------------
+
+INSERT INTO exam.gold.hrm5896_dim_customer (
+  customerid, taxid, statusid, lastname, firstname, middleinitial,
+  gender, tier, dob, addressline1, addressline2, postalcode,
+  city, stateprov, country, phone1, phone2, phone3,
+  email1, email2, iscurrent, batchid, effectivedate, enddate
+)
+SELECT
+  s.customerid, s.taxid, s.statusid, s.lastname, s.firstname, s.middleinitial,
+  s.gender, s.tier, s.dob, s.addressline1, s.addressline2, s.postalcode,
+  s.city, s.stateprov, s.country, s.phone1, s.phone2, s.phone3,
+  s.email1, s.email2, true, s.batchid, current_date(), DATE '9999-12-31'
+FROM stg_gold_customer s
+LEFT JOIN exam.gold.hrm5896_dim_customer t
+  ON s.customerid = t.customerid
+ AND t.iscurrent = true
+WHERE t.customerid IS NULL;
+
+
+
+----------------------
+Staging View Creation
+----------------------
+
+CREATE OR REPLACE TEMP VIEW stg_gold_account AS
+SELECT
+  a.accountid,
+  a.customerid,
+  COALESCE(c.sk_customerid, -1) AS sk_customerid,
+  a.accountdesc,
+  a.taxstatus,
+  a.statusid,
+  a.batchid,
+  current_date()       AS updatedate 
+FROM exam.silver.hrm5896_account a
+LEFT JOIN exam.gold.hrm5896_dim_customer c
+  ON a.customerid = c.customerid
+ AND c.iscurrent = true;
+
+
+
+--------------------------
+Account Dimension Merge
+--------------------------
+
+MERGE INTO exam.gold.hrm5896_dim_account t
+USING stg_gold_account s
+ON t.accountid = s.accountid
+
+WHEN MATCHED
+THEN UPDATE SET
+  t.customerid    = s.customerid,
+  t.sk_customerid = s.sk_customerid,
+  t.accountdesc   = s.accountdesc,
+  t.taxstatus     = s.taxstatus,
+  t.statusid      = s.statusid,
+  t.batchid       = s.batchid,
+  t.updatedate    = s.updatedate
+
+WHEN NOT MATCHED
+THEN INSERT (
+  accountid, customerid, sk_customerid,
+  accountdesc, taxstatus, statusid,
+  batchid, updatedate
+)
+VALUES (
+  s.accountid, s.customerid, s.sk_customerid,
+  s.accountdesc, s.taxstatus, s.statusid,
+  s.batchid, s.updatedate
+);
+
+
+
+%run ./audit_logger
+
+
+-------------------------------
+Aggregation for Reconciliation
+-------------------------------
+
+from pyspark.sql.functions import col, count, when
+
+silver_cust_agg = (
+    silver_customer
+    .groupBy("batchid")
+    .agg(count("*").alias("silver_customer_batch_count"))
+)
+
+gold_cust_agg = (
+    gold_customer
+    .groupBy("batchid")
+    .agg(count("*").alias("gold_customer_batch_count"))
+)
+
+silver_acc_agg = (
+    silver_account
+    .groupBy("batchid")
+    .agg(count("*").alias("silver_account_batch_count"))
+)
+
+gold_acc_agg = (
+    gold_account
+    .groupBy("batchid")
+    .agg(
+        count("*").alias("gold_account_batch_count"),
+        count(when(col("sk_customerid") == -1, 1)).alias("missing_customer_fk")
+    )
+)
+
+
+--------------------
+Reconciliation Join
+--------------------
+
+recon_df = (
+    gold_cust_agg
+    .join(silver_cust_agg, "batchid", "left")
+    .join(gold_acc_agg, "batchid", "left")
+    .join(silver_acc_agg, "batchid", "left")
+)
+
+
+---------------------------
+Reconciliation Validation
+---------------------------
+
+for row in recon_df.collect():
+
+    cust_status = (
+        "PASS"
+        if row.silver_customer_batch_count == row.gold_customer_batch_count
+        else "FAIL"
+    )
+
+    acc_status = (
+        "PASS"
+        if row.silver_account_batch_count == row.gold_account_batch_count
+        else "FAIL"
+    )
+
+    write_audit_log(
+        batch_id=row.batchid,
+        message_source="GOLD_RECON",
+        message_type="AUDIT",
+        message_text="Silver to Gold batch reconciliation",
+        message_data={
+            "silver_customer_batch_count": row.silver_customer_batch_count,
+            "gold_customer_batch_count": row.gold_customer_batch_count,
+            "customer_status": cust_status,
+            "silver_account_batch_count": row.silver_account_batch_count,
+            "gold_account_batch_count": row.gold_account_batch_count,
+            "account_status": acc_status,
+            "missing_customer_fk": row.missing_customer_fk
+        }
+    )
+
