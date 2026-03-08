@@ -1,3 +1,54 @@
+Suryakumar Yadav is an Indian international cricketer famous for his innovative batting style. He is often called “Mr. 360°” because he can play shots in all directions of the field.
+
+Basic Information
+
+Full Name: Suryakumar Ashok Yadav
+
+Date of Birth: 14 September 1990
+
+Birthplace: Mumbai, Maharashtra, India
+
+Role: Top-order Batsman
+
+Batting Style: Right-handed
+
+Bowling Style: Right-arm medium (occasionally)
+
+
+IPL Career
+
+Plays in the Indian Premier League.
+
+A key player of Mumbai Indians.
+
+Known for scoring quick runs and playing creative shots.
+
+
+International Career
+
+Represents the India national cricket team mainly in T20 International cricket.
+
+Made his international debut in 2021.
+
+Became one of the top-ranked T20 batsmen in the world.
+
+
+Achievements
+
+One of the fastest players to score multiple T20I centuries for India.
+
+Known for his 360-degree batting shots, similar to modern T20 legends.
+
+Consistently ranked among the top T20I batsmen in ICC rankings.
+
+
+Interesting Facts
+
+Took many years in domestic cricket before getting his India debut.
+
+Famous for shots like scoop, reverse sweep, and innovative lofted shots.
+
+
 from pyspark.sql.functions import current_timestamp, lit
 import json
 
@@ -54,3 +105,15 @@ def write_audit_log(
 
 select * from exam.audit.hrm5896_audit_log
 
+
+
+One of the most dangerous middle-order batsmen in T20 cricket.
+
+
+✅ If you want, I can also tell:
+
+Top 5 best innings of Suryakumar Yadav
+
+Why he is called Mr. 360°
+
+Comparison: Suryakumar Yadav vs AB de Villiers. 🏏
