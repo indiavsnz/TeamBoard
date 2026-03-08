@@ -1,0 +1,56 @@
+from pyspark.sql.functions import current_timestamp, lit
+import json
+
+HRMID = "HRM1111"
+
+create schema if not exists exam.audit
+
+
+CREATE TABLE IF NOT EXISTS exam.audit.hrm5896_audit_log (
+  MessageDateAndTime TIMESTAMP,
+  BatchID INT,
+  MessageSource STRING,
+  MessageType STRING,
+  MessageText STRING,
+  MessageData STRING,
+  HRMID STRING
+)
+USING DELTA;
+
+
+
+def write_audit_log(
+    batch_id: int,
+    message_source: str = None,
+    message_type: str = None,
+    message_text: str = None,
+    message_data: dict = None,
+    source: str = None
+):
+    final_source = message_source if message_source is not None else source
+    data_json = json.dumps(message_data) if message_data else None
+
+    audit_df = spark.createDataFrame(
+        [(batch_id, final_source, message_type, message_text, data_json, HRMID)],
+        ["BatchID", "MessageSource", "MessageType", "MessageText", "MessageData", "HRMID"]
+    ).withColumn("MessageDateAndTime", current_timestamp())
+
+    audit_df.createOrReplaceTempView("tmp_audit_log")
+
+    spark.sql("""
+        INSERT INTO exam.audit.hrm1111_audit_log
+        SELECT
+            MessageDateAndTime,
+            BatchID,
+            MessageSource,
+            MessageType,
+            MessageText,
+            MessageData,
+            HRMID
+        FROM tmp_audit_log
+    """)
+
+
+
+select * from exam.audit.hrm5896_audit_log
+
