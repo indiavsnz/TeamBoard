@@ -1,3 +1,57 @@
+Sanju Samson is an Indian international cricketer who plays as a wicket-keeper batsman. He is known for his stylish batting, powerful shots, and calm leadership.
+
+Basic Information
+
+Full Name: Sanju Viswanath Samson
+
+Date of Birth: 11 November 1994
+
+Birthplace: Pulluvila, Kerala, India
+
+Role: Wicketkeeper–Batsman
+
+Batting Style: Right-handed
+
+Bowling: Right-arm medium (rarely bowls)
+
+
+IPL Career
+
+Plays in the Indian Premier League.
+
+Captain of Rajasthan Royals.
+
+One of the most consistent Indian batsmen in IPL for Rajasthan Royals.
+
+Known for scoring fast centuries and aggressive batting in the middle order.
+
+
+International Career
+
+Represents the India national cricket team in ODI and T20I formats.
+
+Made his T20 International debut in 2015.
+
+Has scored centuries in both IPL and international matches.
+
+
+Achievements
+
+One of the youngest players to score an IPL half-century.
+
+Led Rajasthan Royals to the IPL 2022 Final as captain.
+
+Known for clean hitting and elegant cover drives.
+
+
+Interesting Facts
+
+Started playing professional cricket at a very young age (17 years).
+
+One of the most talented wicketkeeper-batsmen from Kerala.
+
+Often praised for his calm personality and leadership skills.
+
 
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
@@ -215,3 +269,11 @@ for row in bronze_batches.collect():
     )
 
 
+
+✅ If you want, I can also tell you:
+
+Comparison between Sanju Samson and Ishan Kishan
+
+Sanju Samson IPL records and stats
+
+Why Sanju Samson is sometimes not selected in the Indian team. 🏏
