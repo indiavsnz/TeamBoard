@@ -1,0 +1,414 @@
+from pyspark.sql.functions import *
+from pyspark.sql.window import Window
+from delta.tables import DeltaTable
+
+catalog = "exam"
+silver_schema = "silver"
+bronze_schema = "bronze"
+hrmid = "hrm1111"
+
+spark.sql(f"USE CATALOG {catalog}")
+
+-----------
+Load Bronze
+-----------
+
+bronze_customer_df = spark.table(f"{catalog}.{bronze_schema}.{hrmid}_customer")
+bronze_account_df  = spark.table(f"{catalog}.{bronze_schema}.{hrmid}_account")
+
+
+-------------------
+Duplicate Detection
+-------------------
+
+duplicates_df = bronze_account_df.groupBy("CA_ID").count().filter("count > 1")
+duplicate_records_df = bronze_account_df.join(duplicates_df, "CA_ID", "inner")
+display(duplicate_records_df)
+
+bronze_account_df.count()
+
+
+------------------
+Deduplication
+------------------
+
+customer_df = bronze_customer_df.dropDuplicates(["C_ID"])
+account_df  = bronze_account_df.dropDuplicates(["CA_ID"])
+
+account_df.count()
+
+
+--------------------------
+Data Quality Validation
+--------------------------
+
+customer_mandatory_cols = [
+    "C_ID", "C_TAX_ID", "C_L_NAME", "C_F_NAME",
+    "C_DOB", "C_ADLINE1", "C_ZIPCODE",
+    "C_CITY", "C_STATE_PROV"
+]
+
+for c in customer_mandatory_cols:
+    customer_df = customer_df.filter(col(c).isNotNull())
+
+
+account_df = account_df.filter(
+    col("CA_ID").isNotNull() &
+    col("CA_C_ID").isNotNull()
+)
+
+display(customer_df)
+
+
+-----------------------
+Data Transformation
+-----------------------
+
+from pyspark.sql.functions import *
+
+silver_customer_df = customer_df.select(
+    col("CDC_FLAG"),
+
+    col("C_ID").cast("bigint").alias("customerid"),
+    col("C_TAX_ID").cast("string").alias("taxid"),
+    col("C_ST_ID").cast("string").alias("statusid"),
+
+    col("C_L_NAME").cast("string").alias("lastname"),
+    col("C_F_NAME").cast("string").alias("firstname"),
+    col("C_M_NAME").cast("string").alias("middleinitial"),
+    col("C_GNDR").cast("string").alias("gender"),
+
+    col("C_TIER").cast("tinyint").alias("tier"),
+    to_date(col("C_DOB")).alias("dob"),
+
+    col("C_ADLINE1").cast("string").alias("addressline1"),
+    col("C_ADLINE2").cast("string").alias("addressline2"),
+
+    col("C_ZIPCODE").cast("string").alias("postalcode"),
+    col("C_CITY").cast("string").alias("city"),
+    col("C_STATE_PROV").cast("string").alias("stateprov"),
+    col("C_CTRY").cast("string").alias("country"),
+
+    concat_ws(
+        "-",
+        col("C_CTRY_1").cast("string"),
+        col("C_AREA_1").cast("string"),
+        col("C_LOCAL_1").cast("string"),
+        col("C_EXT_1").cast("string")
+    ).alias("phone1"),
+
+    concat_ws(
+        "-",
+        col("C_CTRY_2").cast("string"),
+        col("C_AREA_2").cast("string"),
+        col("C_LOCAL_2").cast("string"),
+        col("C_EXT_2").cast("string")
+    ).alias("phone2"),
+
+    concat_ws(
+        "-",
+        col("C_CTRY_3").cast("string"),
+        col("C_AREA_3").cast("string"),
+        col("C_LOCAL_3").cast("string"),
+        col("C_EXT_3").cast("string")
+    ).alias("phone3"),
+
+    col("C_EMAIL_1").cast("string").alias("email1"),
+    col("C_EMAIL_2").cast("string").alias("email2"),
+
+    lit(True).cast("boolean").alias("iscurrent"),
+    col("batchid").cast("int").alias("batchid"),
+    
+)
+
+
+
+silver_account_df = account_df.select(
+    col("CDC_FLAG"),
+    col("CA_ID").cast("bigint").alias("accountid"),
+    col("CA_C_ID").cast("bigint").alias("customerid"),
+    col("CA_NAME").alias("accountdesc"),
+    col("CA_TAX_ST").cast("tinyint").alias("taxstatus"),
+    col("CA_ST_ID").alias("statusid"),
+    col("batchid").alias("batchid"),
+    
+)
+
+
+silver_account_df.count()
+
+
+------------------------
+Staging Views Creation
+------------------------
+
+silver_customer_df.createOrReplaceTempView("stg_silver_customer")
+silver_account_df.createOrReplaceTempView("stg_silver_account")
+
+select count(*) from stg_silver_account;
+
+
+------------------------
+Silver Table Creation
+------------------------
+
+%sql
+CREATE TABLE IF NOT EXISTS exam.silver.hrm5896_customer (
+  customerid     BIGINT        NOT NULL,
+  taxid          STRING        NOT NULL,
+  statusid       STRING,
+  lastname       STRING        NOT NULL,
+  firstname      STRING        NOT NULL,
+  middleinitial  STRING,
+  gender         STRING,
+  tier           TINYINT,
+  dob            DATE          NOT NULL,
+  addressline1   STRING        NOT NULL,
+  addressline2   STRING,
+  postalcode     STRING        NOT NULL,
+  city           STRING        NOT NULL,
+  stateprov      STRING        NOT NULL,
+  country        STRING,
+  phone1         STRING,
+  phone2         STRING,
+  phone3         STRING,
+  email1         STRING,
+  email2         STRING,
+  batchid        INT           NOT NULL
+)
+USING DELTA;
+
+
+%sql
+CREATE TABLE IF NOT EXISTS exam.silver.hrm5896_account (
+  accountid     BIGINT        NOT NULL,
+  customerid    BIGINT        NOT NULL,
+  accountdesc   STRING,
+  taxstatus     TINYINT,
+  statusid      STRING,
+  batchid       INT           NOT NULL
+  
+)
+USING DELTA;
+
+
+--------------------
+CDC Processing
+--------------------
+
+%sql
+MERGE INTO exam.silver.hrm5896_customer t
+USING stg_silver_customer s
+ON t.customerid = s.customerid
+
+WHEN MATCHED
+AND s.CDC_FLAG = 'D'
+THEN DELETE
+
+WHEN MATCHED
+AND s.CDC_FLAG IN ('U','I')
+THEN UPDATE SET
+  t.taxid         = s.taxid,
+  t.statusid      = s.statusid,
+  t.lastname      = s.lastname,
+  t.firstname     = s.firstname,
+  t.middleinitial = s.middleinitial,
+  t.gender        = s.gender,
+  t.tier          = s.tier,
+  t.dob           = s.dob,
+  t.addressline1  = s.addressline1,
+  t.addressline2  = s.addressline2,
+  t.postalcode    = s.postalcode,
+  t.city          = s.city,
+  t.stateprov     = s.stateprov,
+  t.country       = s.country,
+  t.phone1        = s.phone1,
+  t.phone2        = s.phone2,
+  t.phone3        = s.phone3,
+  t.email1        = s.email1,
+  t.email2        = s.email2,
+  t.batchid       = s.batchid
+
+WHEN NOT MATCHED
+AND s.CDC_FLAG IN ('I','U')
+THEN INSERT (
+  customerid, taxid, statusid, lastname, firstname, middleinitial,
+  gender, tier, dob, addressline1, addressline2, postalcode,
+  city, stateprov, country, phone1, phone2, phone3,
+  email1, email2, batchid
+)
+VALUES (
+  s.customerid, s.taxid, s.statusid, s.lastname, s.firstname, s.middleinitial,
+  s.gender, s.tier, s.dob, s.addressline1, s.addressline2, s.postalcode,
+  s.city, s.stateprov, s.country, s.phone1, s.phone2, s.phone3,
+  s.email1, s.email2, s.batchid
+);
+
+
+
+%sql
+MERGE INTO exam.silver.hrm5896_account t
+USING stg_silver_account s
+ON t.accountid = s.accountid
+
+WHEN MATCHED
+AND s.CDC_FLAG = 'D'
+THEN DELETE
+
+WHEN MATCHED
+AND s.CDC_FLAG IN ('U','I')
+THEN UPDATE SET
+  t.customerid  = s.customerid,
+  t.accountdesc = s.accountdesc,
+  t.taxstatus   = s.taxstatus,
+  t.statusid    = s.statusid,
+  t.batchid     = s.batchid
+  
+
+WHEN NOT MATCHED
+AND s.CDC_FLAG IN ('I','U')
+THEN INSERT (
+  accountid, customerid, accountdesc,
+  taxstatus, statusid, batchid
+)
+VALUES (
+  s.accountid, s.customerid, s.accountdesc,
+s.taxstatus, s.statusid, s.batchid
+);
+
+
+
+%run ./audit_logger
+
+
+---------------------
+Reconciliation Check
+---------------------
+
+bronze_customer = spark.table("exam.bronze.hrm5896_customer")
+silver_customer = spark.table("exam.silver.hrm5896_customer")
+
+bronze_account  = spark.table("exam.bronze.hrm5896_account")
+silver_account  = spark.table("exam.silver.hrm5896_account")    
+
+
+silver_batches = silver_customer.select("batchid").distinct()
+
+
+-------------------
+Audit Log Writing
+-------------------
+
+for row in silver_batches.collect():
+    batch_id = row.batchid
+
+    bronze_cust_cnt = bronze_customer.filter(f"batchid = {batch_id}").count()
+    silver_cust_cnt = silver_customer.filter(f"batchid = {batch_id}").count()
+
+    bronze_acc_cnt  = bronze_account.filter(f"batchid = {batch_id}").count()
+    silver_acc_cnt  = silver_account.filter(f"batchid = {batch_id}").count()
+
+    cust_status = "PASS" if bronze_cust_cnt == silver_cust_cnt else "FAIL"
+    acc_status  = "PASS" if bronze_acc_cnt  == silver_acc_cnt  else "FAIL"
+
+    write_audit_log(
+        batch_id,
+        "SILVER_RECON",
+        "AUDIT",
+        "Bronze to Silver batch reconciliation",
+        {
+            "bronze_customer_batch_count": bronze_cust_cnt,
+            "silver_customer_batch_count": silver_cust_cnt,
+            "customer_status": cust_status,
+            "bronze_account_batch_count": bronze_acc_cnt,
+            "silver_account_batch_count": silver_acc_cnt,
+            "account_status": acc_status
+        }
+    )
+
+
+
+
+
+Data Quality
+-------------
+
+from pyspark.sql.functions import *
+
+def validate_data(df, key_col):
+
+    valid_df = df.filter(
+        (col(key_col).isNotNull()) &
+        (col("CDC_FLAG").isin("I","U","D"))
+    )
+
+    invalid_df = df.filter(
+        (col(key_col).isNull()) |
+        (~col("CDC_FLAG").isin("I","U","D"))
+    )
+
+    return valid_df, invalid_df
+
+valid_customers, bad_customers = validate_data(bronze_customers, "C_ID")
+valid_accounts, bad_accounts = validate_data(bronze_accounts, "CA_ID")
+
+--------------
+Store Bad Records (Quarantine)
+----------
+
+bad_customers.write.mode("append").format("delta").saveAsTable("a1.silver.quarantine_customers")
+bad_accounts.write.mode("append").format("delta").saveAsTable("a1.silver.quarantine_accounts")
+  
+
+-------------------
+ Deduplicate Records
+-------------------
+
+from pyspark.sql.window import Window
+
+window_spec = Window.partitionBy("C_ID").orderBy(col("_ingest_time").desc())
+customers_dedup = valid_customers \
+.withColumn("row_num", row_number().over(window_spec)) \
+.filter(col("row_num")==1) \
+.drop("row_num")
+
+window_spec_acc = Window.partitionBy("CA_ID").orderBy(col("_ingest_time").desc())
+accounts_dedup = valid_accounts \
+.withColumn("row_num", row_number().over(window_spec_acc)) \
+.filter(col("row_num")==1) \
+.drop("row_num")
+
+
+---------------
+CDC
+---------------
+
+customers_dedup.createOrReplaceTempView("customers_updates")
+
+spark.sql("""
+MERGE INTO a1.silver.silver_customers t
+USING customers_updates s
+ON t.C_ID = s.C_ID
+
+WHEN MATCHED AND s.CDC_FLAG = 'D'
+    THEN DELETE
+
+WHEN MATCHED AND s.CDC_FLAG = 'U'
+    THEN UPDATE SET *
+
+WHEN NOT MATCHED AND s.CDC_FLAG = 'I'
+    THEN INSERT *
+""")
+
+-------------------
+Data Quality Report
+-------------------
+
+dq_report = spark.createDataFrame([
+    ("customers", bronze_customers.count(), valid_customers.count(), bad_customers.count()),
+    ("accounts", bronze_accounts.count(), valid_accounts.count(), bad_accounts.count())
+],["table","total_records","valid_records","invalid_records"])
+
+display(dq_report)
+
+
